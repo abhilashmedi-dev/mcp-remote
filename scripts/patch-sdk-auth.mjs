@@ -24,7 +24,8 @@ function replaceExact(oldText, newText, label) {
   }
 
   if (!source.includes(oldText)) {
-    throw new Error(`Could not find expected SDK snippet for ${label}`)
+    console.warn(`Skipping SDK patch for ${label}: expected snippet not found`)
+    return
   }
 
   source = source.replace(oldText, newText)
