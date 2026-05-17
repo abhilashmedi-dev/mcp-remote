@@ -34,6 +34,7 @@ export class NodeOAuthClientProvider implements OAuthClientProvider {
   private authorizationServerMetadata: AuthorizationServerMetadata | undefined
   private protectedResourceMetadata: ProtectedResourceMetadata | undefined
   private wwwAuthenticateScope: string | undefined
+  private isClientCredentialsFlow: boolean
 
   /**
    * Creates a new NodeOAuthClientProvider
@@ -54,16 +55,43 @@ export class NodeOAuthClientProvider implements OAuthClientProvider {
     this.authorizationServerMetadata = options.authorizationServerMetadata
     this.protectedResourceMetadata = options.protectedResourceMetadata
     this.wwwAuthenticateScope = options.wwwAuthenticateScope
+
+    // Detect client_credentials flow from static client info
+    const info = this.staticOAuthClientInfo as any
+    this.isClientCredentialsFlow =
+      info?.grant_type === 'client_credentials' ||
+      (Array.isArray(info?.grant_types) && info.grant_types.includes('client_credentials'))
+
+    if (this.isClientCredentialsFlow) {
+      log('Using client_credentials grant type (non-interactive flow)')
+    }
   }
 
-  get redirectUrl(): string {
+  get redirectUrl(): string | undefined {
+    if (this.isClientCredentialsFlow) {
+      return undefined
+    }
     return `http://${this.options.host}:${this.options.callbackPort}${this.callbackPath}`
   }
 
   get clientMetadata() {
     const effectiveScope = this.getEffectiveScope()
+    if (this.isClientCredentialsFlow) {
+      return {
+        redirect_uris: [],
+        token_endpoint_auth_method: 'client_secret_post',
+        grant_types: ['client_credentials'],
+        response_types: [],
+        client_name: this.clientName,
+        client_uri: this.clientUri,
+        software_id: this.softwareId,
+        software_version: this.softwareVersion,
+        ...this.staticOAuthClientMetadata,
+        scope: effectiveScope,
+      }
+    }
     return {
-      redirect_uris: [this.redirectUrl],
+      redirect_uris: [this.redirectUrl!],
       token_endpoint_auth_method: 'none',
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],
@@ -78,6 +106,25 @@ export class NodeOAuthClientProvider implements OAuthClientProvider {
 
   state(): string {
     return this._state
+  }
+
+  /**
+   * Prepares token request parameters for non-interactive flows (client_credentials).
+   * When this returns URLSearchParams, the SDK uses them directly instead of the authorization code flow.
+   * Only includes scope if explicitly provided by the user via --static-oauth-client-metadata.
+   */
+  prepareTokenRequest(scope?: string): URLSearchParams | undefined {
+    if (!this.isClientCredentialsFlow) {
+      return undefined
+    }
+    debugLog('Preparing client_credentials token request')
+    const params = new URLSearchParams({ grant_type: 'client_credentials' })
+    // Only include scope if explicitly set by user, not from auto-discovery
+    const userScope = this.staticOAuthClientMetadata?.scope
+    if (userScope) {
+      params.set('scope', userScope)
+    }
+    return params
   }
 
   /**
