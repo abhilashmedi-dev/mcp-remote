@@ -1,4 +1,3 @@
-@ -0,0 +1,234 @@
 #!/usr/bin/env node
 import {
   JSONRPCMessageSchema,
